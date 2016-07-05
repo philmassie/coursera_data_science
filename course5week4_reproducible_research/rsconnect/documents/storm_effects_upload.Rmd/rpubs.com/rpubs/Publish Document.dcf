@@ -1,0 +1,7 @@
+name: Publish Document
+account: rpubs
+server: rpubs.com
+appId: https://api.rpubs.com/api/v1/document/193096/ac5335671bd74cfaaf9fe4f3a4135ff6
+bundleId: https://api.rpubs.com/api/v1/document/193096/ac5335671bd74cfaaf9fe4f3a4135ff6
+url: http://rpubs.com/philmassie/193096
+when: 1467331280.27834

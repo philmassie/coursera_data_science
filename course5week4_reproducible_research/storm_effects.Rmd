@@ -1,0 +1,184 @@
+---
+title: "Storm event impacts in the USA between 1950 and 2011"
+author: "Philip Massie"
+date: "30 June 2016"
+output: html_document
+---
+
+## Synopsis
+
+This analysis set out to answer the following questions:
+
+1. Across the United States, which types of events are most harmful with respect to population health?
+2. Across the United States, which types of events have the greatest economic consequences?
+    
+The findings suggest that tornados play the largest roles in terms of both human health and economic consequences. Tornados are the most costly in both categories accounting for 5633 deaths, 91346 injuries as well as $52 167 160 779 damage to property and $414 953 270 damage to crops. Thunderstorms had the second largest impacts in terms of human health (701 deaths and 9363 injuries) while flooding accounted for the second largest economic impacts($34 407 709 807 damage to property, $5 661 968 450 damage to crops).
+
+## Data Processing
+Initially the compressed data file was downloaded from the Coursera course repository. The data file, StormData.csv was then extracted from the compressed file StormData.csv.bz2 and stored in the R data frame 'storm.data' (hereafter referred to as 'the data'). 
+
+A brief analysis of the data revealed that the variables 'FATALITIES' and 'INJURIES' would relate to population health and the variables 'PROPDMG' and 'CROPDMG' would relate to economic consequences. 
+
+```{r, echo=TRUE}
+## Prerequisites
+# setwd("D:/My Folders/R/2016/coursera/data_science/mod_5_week_4")
+# download file and extract data
+# download.file("https://d396qusza40orc.cloudfront.net/repdata/data/StormData.csv.bz2", "StormData.csv.bz2")
+# file downloaded 2016/06/30 15:45
+# data <- read.csv("StormData.csv.bz2")
+# save(data, file = "data.RData")
+load(file = "data.RData")
+storm.data <- data
+head(storm.data)
+# Check the time frames
+library(stringr)
+
+storm.data$BGN_DATE <- as.POSIXct(as.Date(str_sub(storm.data$BGN_DATE, start = 1L, end = -9L), format = "%m/%d/%Y"))
+min(storm.data$BGN_DATE)
+max(storm.data$BGN_DATE)
+```
+
+The values in the 'PROPDMG' and 'CROPDMG' variables needed to be processed according to the 'PROPDMGEXP' and 'CROPDMGEXP' columns. Where the EXP variable contained a B, the corresponding DMG was multiplied by 1 000 000 000, where EXP contained an M, the corresponding DMG was multiplied by 1 000 000, where EXP contained an K, the corresponding DMG was multiplied by 1 000 and where EXP contained an H, the corresponding DMG was multiplied by 1000. Where the EXP column contained undocumented values, no transformation was performed.
+
+```{r, echo=TRUE}
+# Process the damage costs
+# The costs need to be multiplied by an exponent specified in the accompanying EXP column.
+unique(storm.data$PROPDMGEXP)
+ind.b <- which(storm.data$PROPDMGEXP == "B") #Billions
+ind.m <- which(storm.data$PROPDMGEXP == "m" | storm.data$PROPDMGEXP == "M") # Millions
+ind.k <- which(storm.data$PROPDMGEXP == "K") #Thousands
+ind.h <- which(storm.data$PROPDMGEXP == "h" | storm.data$PROPDMGEXP == "H") # Hundreds
+
+storm.data$PROPDMG[ind.b] <- storm.data$PROPDMG[ind.b] * 100000000
+storm.data$PROPDMG[ind.m] <- storm.data$PROPDMG[ind.m] * 1000000
+storm.data$PROPDMG[ind.k] <- storm.data$PROPDMG[ind.k] * 1000
+storm.data$PROPDMG[ind.h] <- storm.data$PROPDMG[ind.h] * 100
+
+unique(storm.data$CROPDMGEXP)
+ind.b <- which(storm.data$CROPDMGEXP == "B") #Billions
+ind.m <- which(storm.data$CROPDMGEXP == "m" | storm.data$CROPDMGEXP == "M") # Millions
+ind.k <- which(storm.data$CROPDMGEXP == "k" | storm.data$CROPDMGEXP == "K") #Thousands
+
+storm.data$CROPDMG[ind.b] <- storm.data$CROPDMG[ind.b] * 100000000
+storm.data$CROPDMG[ind.m] <- storm.data$CROPDMG[ind.m] * 1000000
+storm.data$CROPDMG[ind.k] <- storm.data$CROPDMG[ind.k] * 1000
+```
+
+The data were then subset to include only the following variables: 'EVTYPE', 'FATALITIES', 'INJURIES', 'PROPDMG' and 'CROPDMG' for the sake of simplicity.
+
+```{r, echo=TRUE}
+# Subset the full dataframe to include only the columns of interest
+names(storm.data)
+storm.data <- storm.data[, c("EVTYPE", "FATALITIES", "INJURIES", "PROPDMG", "CROPDMG")]
+```
+
+*Event type processing*
+
+The referenced document 'NATIONAL WEATHER SERVICE INSTRUCTION 10-1605' (hereafter referred to as 'the document') refers to 48 storm event categories while the variable 'EVTYPE' contains 985 unique event types. Further examination of 'EVTYPE' revealed that the variable contained many discrepancies, result of spelling errors (e.g. 'High Windss'), contractions (e.g. 'Tstm Wind') plurals ('Rip Currents') and other similar mistakes. The following efforts were made to reduce and refine this variable.
+
+Leading and training whitespace were trimmed from the variable entries, double spaces were replaced with single spaces and cases were changed to sentence case. A vector containing the 48 event types found in the document was generated. The only alteration made was from 'Hurricane (Typhoon)' to 'Hurricane/Typhoon' for matching purposes. A variable named 'in.doc' was added to the data containing a Boolean indicator as to whether each 'EVTYPE' was listed in the document. Using this column, it was determined that 'EVTYPEs' not mentioned in the document, did contribute to the most harmful to health and economically consequential categories. They were therefore not exluded from this analysis.
+
+Further refinement was not undertaken onthe remining 'EVTYPE' errors. It was determined that it was unlikely that they would contribute any meaninful impact to this analysis.
+
+```{r, echo=TRUE}
+# take a look at the data
+head(storm.data)
+summary(storm.data)
+
+## Tidy up the event type names. 
+# There are some duplicates so this process shortens the list somewhat too.
+length(unique(storm.data$EVTYPE))
+
+# trim whitespace from messy event type names
+storm.data$EVTYPE <- trimws(storm.data$EVTYPE, "both")
+
+# replace double spaces with singles
+storm.data$EVTYPE <- str_replace_all(storm.data$EVTYPE, "  ", " ")
+
+# fix the case of messy event names for better plotting
+storm.data$EVTYPE <- str_to_title(storm.data$EVTYPE)
+
+# These corrections were determined by iteratively evaluating the top 20 of both injury.data and damage.data
+# To see the uncorrected data simply dont run these three corrections
+storm.data$EVTYPE[which(storm.data$EVTYPE == "Tstm Wind" | storm.data$EVTYPE == "Thunderstorm Winds")] <- "Thunderstorm Wind"
+storm.data$EVTYPE[which(storm.data$EVTYPE == "Rip Currents")] <- "Rip Current"
+storm.data$EVTYPE[which(storm.data$EVTYPE == "High Winds")] <- "High Wind"
+
+```
+The data were grouped by 'EVTYPE'. The individual, cumulative values for 'FATALITIES' and 'INJURIES' were summed for each 'EVTYPE' and saved to a data.frame called injury.data. 'PROPDMG' and 'CROPDMG' data were similarly processed into a data frame named damage.data. In both cases the total injury/damage per event type was determined by summing the data, and this column was used to sort the new data frames in descending order. Event types with totals of zero were removed. Visual inspection of the resulting revealed that the top 10 contributors adequately represented the primary contributors. The top 10 contributing 'EVTYPEs' in each category were visually inspected and the following corrections were made in order to correct obvious mistakes and repetitions in these contributors.
+
+1.	'Tstm Wind' and 'Thunderstorm Winds' were replaced with 'Thunderstorm Wind'
+2.	'Rip Currents' was replaced with 'Rip Current'
+3.	'High Winds' was replaced with 'High Wind'
+
+These corrections were determined iteratively and applied retroactively to the above processing pipeline.
+
+```{r, echo=TRUE}
+# Check which names in data set match names in Doc
+# Changed 'Hurricane (Typhooon)' to 'Hurricane/Typhoon' to match data set
+event.names.in.doc <- c('Astronomical Low Tide', 'Avalanche', 'Blizzard', 'Coastal Flood', 'Cold/Wind Chill', 'Debris Flow', 'Dense Fog', 'Dense Smoke', 'Drought', 'Dust Devil', 'Dust Storm', 'Excessive Heat', 'Extreme Cold/Wind Chill', 'Flash Flood', 'Flood', 'Frost/Freeze', 'Funnel Cloud', 'Freezing Fog', 'Hail', 'Heat', 'Heavy Rain', 'Heavy Snow', 'High Surf', 'High Wind', 'Hurricane/Typhoon', 'Ice Storm', 'Lake-Effect Snow', 'Lakeshore Flood', 'Lightning', 'Marine Hail', 'Marine High Wind', 'Marine Strong Wind', 'Marine Thunderstorm Wind', 'Rip Current', 'Seiche', 'Sleet', 'Storm Surge/Tide', 'Strong Wind',  'Thunderstorm Wind', 'Tornado', 'Tropical Depression', 'Tropical Storm', 'Tsunami', 'Volcanic Ash', 'Waterspout', 'Wildfire', 'Winter Storm', 'Winter Weather')
+
+# This function aggregates and sorts the data
+data.separator <- function(col1, col2) {
+    storm.data$in.doc <- sapply(storm.data$EVTYPE, function(x) if (x %in% event.names.in.doc) {return(TRUE)} else {return(FALSE)})
+    stemp <- aggregate(cbind(col1, col2) ~ EVTYPE + in.doc, storm.data, sum)
+    # 2. sum the impacts
+    stemp$tot <- stemp$col1 + stemp$col2
+    # 3. sort by the total impact
+    stemp <- stemp[order(-stemp$tot), ]
+    # tidy up the row names
+    row.names(stemp) <- NULL
+    names(stemp)[c(3,4)] <- c(str_to_title(substitute(col1)),str_to_title(substitute(col2)))
+    stemp <- stemp[(stemp$tot != 0) ,]
+    return(stemp)
+}
+
+injury.data <- with(storm.data, data.separator(FATALITIES, INJURIES))
+damage.data <- with(storm.data, data.separator(PROPDMG, CROPDMG))
+
+# check out the to 20 for obvious errors
+head(injury.data, 20)
+head(damage.data, 20)
+
+# plot(injury.data$tot[1:100])
+# plot(damage.data$tot[1:100])
+
+# # Are there any values in event.names.in.doc which arent mentioned in EVTYPE?
+# # only missing is "Debris Flow"
+# event_names[!(event.names.doc %in% storm.data$EVTYPE)]
+```
+
+## Results
+
+Prepare the data for plotting.
+```{r, echo=TRUE}
+library(ggplot2)
+library(reshape2)
+
+injury.data <- injury.data[1:10, ]
+injury.data.mlt <- melt(injury.data, "EVTYPE", measure.vars = c('Fatalities', 'Injuries'))
+
+damage.data <- damage.data[1:10, ]
+names(damage.data)[c(3,4)] <- c('Property Damage', 'Crop Damage')
+damage.data.mlt <- melt(damage.data, "EVTYPE", measure.vars = c('Property Damage', 'Crop Damage'))
+damage.data.mlt$value <- damage.data.mlt$value/1000000000
+
+```
+```{r, echo=TRUE}
+ggplot(injury.data.mlt, aes(x = reorder(EVTYPE, -value), y = value, fill = variable)) + geom_bar(stat="identity") +
+    theme(axis.text.x=element_text(angle=45,hjust=1)) + 
+    labs(title="Ten Storm Event types with the highest Human Health Cost.", x = "Event type", y = "Number of Injuries / Fatalities") +
+    guides(fill=guide_legend(title="Health Impact Type"))
+```
+
+***Figure 1:*** *The numbers of Injuries and fatalities associated with the ten most damaging storm event types in the USA. By far the most harm is caused by tornados with the next biggest contributor, thunderstorm wind generating only a small fraction of comparitively harm.*
+
+
+```{r, echo=TRUE}
+ggplot(damage.data.mlt, aes(x = reorder(EVTYPE, -value), y = value, fill = variable)) + geom_bar(stat="identity") +
+    theme(axis.text.x=element_text(angle=45,hjust=1)) + 
+    labs(title="Ten Storm Event types with the highest Economic Cost.", x = "Event type", y = "Economic Damage (x 1 000 000 000 USD)") +
+    guides(fill=guide_legend(title="Economic Cost Type"))
+```
+
+***Figure 2:*** *The economic cost in USD of the ten most destructive, storm related contributors in the USA. tornados and floods are the major contributors. There is less of a relative discrepancy between the two most destructive economic impacts than for human impacts.*
